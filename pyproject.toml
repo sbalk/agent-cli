@@ -16,6 +16,7 @@ dependencies = [
     "typer",
     "openai",
     "dotenv",
+    "aiohttp",
 ]
 requires-python = ">=3.11"
 
