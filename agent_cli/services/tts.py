@@ -52,11 +52,19 @@ def get_synthesizer(
     if not audio_output_config.enable_tts:
         return _dummy_synthesizer
     if provider_config.tts_provider == "openai":
-        return partial(
-            _synthesize_speech_openai,
-            openai_tts_config=openai_tts_config,
-            openai_llm_config=openai_llm_config,
-        )
+        if use_streaming:
+            return partial(
+                _synthesize_speech_openai_streaming,
+                openai_tts_config=openai_tts_config,
+                openai_llm_config=openai_llm_config,
+                audio_output_config=audio_output_config,
+            )
+        else:
+            return partial(
+                _synthesize_speech_openai,
+                openai_tts_config=openai_tts_config,
+                openai_llm_config=openai_llm_config,
+            )
     if provider_config.tts_provider == "kokoro":
         if use_streaming:
             return partial(
@@ -232,6 +240,104 @@ async def _synthesize_speech_openai(
     )
 
 
+async def _synthesize_speech_openai_streaming(
+    *,
+    text: str,
+    openai_tts_config: config.OpenAITTS,
+    openai_llm_config: config.OpenAILLM,
+    logger: logging.Logger,
+    audio_output_config: config.AudioOutput,
+    quiet: bool = False,
+    stop_event: InteractiveStopEvent | None = None,
+    live: Live,
+    **_kwargs: object,
+) -> bytes | None:
+    """Synthesize and stream speech from text using OpenAI TTS server."""
+    try:
+        import aiohttp
+        
+        if not openai_llm_config.openai_api_key:
+            logger.error("OpenAI API key is not set")
+            return None
+        
+        # Create the request payload
+        payload = {
+            "model": openai_tts_config.openai_tts_model,
+            "voice": openai_tts_config.openai_tts_voice,
+            "input": text,
+            "response_format": "wav",
+        }
+        
+        # Stream the audio and play it immediately
+        audio_data = io.BytesIO()
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.openai.com/v1/audio/speech",
+                json=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {openai_llm_config.openai_api_key}",
+                },
+            ) as response:
+                if response.status != 200:
+                    logger.error("OpenAI TTS request failed with status %d", response.status)
+                    return None
+                
+                # Get audio metadata from headers or assume defaults
+                sample_rate = 22050  # Default for most TTS models
+                sample_width = 2  # 16-bit
+                channels = 1  # Mono
+                
+                # Set up audio playback stream
+                with pyaudio_context() as p:
+                    stream_config = setup_output_stream(
+                        audio_output_config.output_device_index,
+                        sample_rate=sample_rate,
+                        sample_width=sample_width,
+                        channels=channels,
+                    )
+                    
+                    with open_pyaudio_stream(p, **stream_config) as stream:
+                        base_msg = f"🔊 Playing audio at {audio_output_config.tts_speed}x speed" if audio_output_config.tts_speed != 1.0 else "🔊 Playing audio"
+                        async with live_timer(live, base_msg, style="blue", quiet=quiet):
+                            chunk_size = constants.PYAUDIO_CHUNK_SIZE
+                            buffer = b""
+                            
+                            async for chunk in response.content.iter_chunked(chunk_size * 2):  # Read in larger chunks
+                                if stop_event and stop_event.is_set():
+                                    logger.info("Audio playback interrupted")
+                                    if not quiet:
+                                        print_with_style("⏹️ Audio playback interrupted", style="yellow")
+                                    break
+                                
+                                buffer += chunk
+                                audio_data.write(chunk)
+                                
+                                # Play audio when we have enough data
+                                while len(buffer) >= chunk_size:
+                                    audio_chunk = buffer[:chunk_size]
+                                    buffer = buffer[chunk_size:]
+                                    stream.write(audio_chunk)
+                                    await asyncio.sleep(0)
+                            
+                            # Play any remaining buffer
+                            if buffer and not (stop_event and stop_event.is_set()):
+                                stream.write(buffer)
+                                await asyncio.sleep(0)
+        
+        if not (stop_event and stop_event.is_set()):
+            logger.info("Audio playback completed (speed: %.1fx)", audio_output_config.tts_speed)
+            if not quiet:
+                print_with_style("✅ Audio playback finished")
+        
+        return audio_data.getvalue()
+        
+    except Exception:
+        logger.exception("Error during OpenAI streaming speech synthesis")
+        return None
+
+
 async def _synthesize_speech_kokoro_streaming(
     *,
     text: str,
@@ -257,9 +363,6 @@ async def _synthesize_speech_kokoro_streaming(
         
         # Stream the audio and play it immediately
         audio_data = io.BytesIO()
-        sample_rate = None
-        sample_width = None
-        channels = None
         
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -477,9 +580,9 @@ async def _speak_text(
     live: Live,
 ) -> bytes | None:
     """Synthesize and optionally play speech from text."""
-    # Use streaming for Kokoro TTS when playing audio
+    # Use streaming for TTS when playing audio (both OpenAI and Kokoro support it)
     use_streaming = (
-        provider_config.tts_provider == "kokoro" and play_audio_flag
+        provider_config.tts_provider in ["kokoro", "openai"] and play_audio_flag
     )
     
     synthesizer = get_synthesizer(
