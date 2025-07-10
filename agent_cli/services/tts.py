@@ -351,70 +351,62 @@ async def _synthesize_speech_kokoro_streaming(
 ) -> bytes | None:
     """Synthesize and stream speech from text using Kokoro TTS server."""
     try:
-        import aiohttp
-        
-        # Create the request payload
-        payload = {
-            "model": kokoro_tts_config.kokoro_tts_model,
-            "voice": kokoro_tts_config.kokoro_tts_voice,
-            "input": text,
-            "response_format": "wav",
-        }
+        client = AsyncOpenAI(
+            api_key="not-needed",
+            base_url=kokoro_tts_config.kokoro_tts_host,
+        )
         
         # Stream the audio and play it immediately
         audio_data = io.BytesIO()
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{kokoro_tts_config.kokoro_tts_host}/v1/audio/speech",
-                json=payload,
-                headers={"Content-Type": "application/json"},
-            ) as response:
-                if response.status != 200:
-                    logger.error("Kokoro TTS request failed with status %d", response.status)
-                    return None
+        # Use OpenAI SDK's built-in streaming
+        async with client.audio.speech.with_streaming_response.create(
+            model=kokoro_tts_config.kokoro_tts_model,
+            voice=kokoro_tts_config.kokoro_tts_voice,
+            input=text,
+            response_format="wav",
+        ) as response:
+            # Get audio metadata from headers or assume defaults
+            sample_rate = 22050  # Default for most TTS models
+            sample_width = 2  # 16-bit
+            channels = 1  # Mono
+            
+            # Set up audio playback stream
+            with pyaudio_context() as p:
+                stream_config = setup_output_stream(
+                    audio_output_config.output_device_index,
+                    sample_rate=sample_rate,
+                    sample_width=sample_width,
+                    channels=channels,
+                )
                 
-                # Get audio metadata from headers or assume defaults
-                sample_rate = 22050  # Default for most TTS models
-                sample_width = 2  # 16-bit
-                channels = 1  # Mono
-                
-                # Set up audio playback stream
-                with pyaudio_context() as p:
-                    stream_config = setup_output_stream(
-                        audio_output_config.output_device_index,
-                        sample_rate=sample_rate,
-                        sample_width=sample_width,
-                        channels=channels,
-                    )
-                    
-                    with open_pyaudio_stream(p, **stream_config) as stream:
-                        base_msg = f"🔊 Playing audio at {audio_output_config.tts_speed}x speed" if audio_output_config.tts_speed != 1.0 else "🔊 Playing audio"
-                        async with live_timer(live, base_msg, style="blue", quiet=quiet):
-                            chunk_size = constants.PYAUDIO_CHUNK_SIZE
-                            buffer = b""
+                with open_pyaudio_stream(p, **stream_config) as stream:
+                    base_msg = f"🔊 Playing audio at {audio_output_config.tts_speed}x speed" if audio_output_config.tts_speed != 1.0 else "🔊 Playing audio"
+                    async with live_timer(live, base_msg, style="blue", quiet=quiet):
+                        chunk_size = constants.PYAUDIO_CHUNK_SIZE
+                        buffer = b""
+                        
+                        async for chunk in response:
+                            if stop_event and stop_event.is_set():
+                                logger.info("Audio playback interrupted")
+                                if not quiet:
+                                    print_with_style("⏹️ Audio playback interrupted", style="yellow")
+                                break
                             
-                            async for chunk in response.content.iter_chunked(chunk_size * 2):  # Read in larger chunks
-                                if stop_event and stop_event.is_set():
-                                    logger.info("Audio playback interrupted")
-                                    if not quiet:
-                                        print_with_style("⏹️ Audio playback interrupted", style="yellow")
-                                    break
-                                
-                                buffer += chunk
-                                audio_data.write(chunk)
-                                
-                                # Play audio when we have enough data
-                                while len(buffer) >= chunk_size:
-                                    audio_chunk = buffer[:chunk_size]
-                                    buffer = buffer[chunk_size:]
-                                    stream.write(audio_chunk)
-                                    await asyncio.sleep(0)
+                            buffer += chunk
+                            audio_data.write(chunk)
                             
-                            # Play any remaining buffer
-                            if buffer and not (stop_event and stop_event.is_set()):
-                                stream.write(buffer)
+                            # Play audio when we have enough data
+                            while len(buffer) >= chunk_size:
+                                audio_chunk = buffer[:chunk_size]
+                                buffer = buffer[chunk_size:]
+                                stream.write(audio_chunk)
                                 await asyncio.sleep(0)
+                        
+                        # Play any remaining buffer
+                        if buffer and not (stop_event and stop_event.is_set()):
+                            stream.write(buffer)
+                            await asyncio.sleep(0)
         
         if not (stop_event and stop_event.is_set()):
             logger.info("Audio playback completed (speed: %.1fx)", audio_output_config.tts_speed)
