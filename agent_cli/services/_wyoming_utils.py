@@ -47,16 +47,18 @@ async def wyoming_client_context(
         async with AsyncClient.from_uri(uri) as client:
             logger.info("%s connection established", server_type)
             yield client
-    except ConnectionRefusedError:
-        logger.exception("%s connection refused.", server_type)
+    except (ConnectionRefusedError, OSError) as e:
+        # Don't use logger.exception here to avoid traceback for common errors
+        logger.exception("%s connection failed", server_type)
         if not quiet:
             print_error_message(
-                f"{server_type} connection refused.",
+                f"{server_type} connection failed.",
                 f"Is the Wyoming {server_type.lower()} server running at {uri}?",
             )
-        raise
+        # Re-raise as ConnectionRefusedError so callers can handle it consistently.
+        raise ConnectionRefusedError from e
     except Exception as e:
-        logger.exception("An error occurred during %s connection", server_type.lower())
+        logger.exception("An unexpected error occurred during %s connection", server_type.lower())
         if not quiet:
-            print_error_message(f"{server_type} error: {e}")
+            print_error_message(f"An unexpected {server_type} error occurred: {e}")
         raise

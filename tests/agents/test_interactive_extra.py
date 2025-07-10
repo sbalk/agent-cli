@@ -165,12 +165,13 @@ def test_chat_command_list_output_devices():
     """Test the list-output-devices flag."""
     runner = CliRunner()
     with (
+        patch("agent_cli.core.process.is_process_running", return_value=False),
         patch("agent_cli.agents.chat.setup_devices") as mock_setup_devices,
         patch("agent_cli.agents.chat.pyaudio_context") as mock_pyaudio_context,
     ):
         mock_setup_devices.return_value = None
         result = runner.invoke(app, ["chat", "--list-devices"])
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         mock_pyaudio_context.assert_called_once()
         mock_setup_devices.assert_called_once()
 

@@ -342,24 +342,35 @@ async def _async_main(
                 signal_handling_context(LOGGER, general_cfg.quiet) as stop_event,
             ):
                 while not stop_event.is_set():
-                    await _handle_conversation_turn(
-                        p=p,
-                        stop_event=stop_event,
-                        conversation_history=conversation_history,
-                        provider_cfg=provider_cfg,
-                        general_cfg=general_cfg,
-                        history_cfg=history_cfg,
-                        audio_in_cfg=audio_in_cfg,
-                        wyoming_asr_cfg=wyoming_asr_cfg,
-                        openai_asr_cfg=openai_asr_cfg,
-                        ollama_cfg=ollama_cfg,
-                        openai_llm_cfg=openai_llm_cfg,
-                        audio_out_cfg=audio_out_cfg,
-                        wyoming_tts_cfg=wyoming_tts_cfg,
-                        openai_tts_cfg=openai_tts_cfg,
-                        kokoro_tts_config=kokoro_tts_config,
-                        live=live,
-                    )
+                    try:
+                        await _handle_conversation_turn(
+                            p=p,
+                            stop_event=stop_event,
+                            conversation_history=conversation_history,
+                            provider_cfg=provider_cfg,
+                            general_cfg=general_cfg,
+                            history_cfg=history_cfg,
+                            audio_in_cfg=audio_in_cfg,
+                            wyoming_asr_cfg=wyoming_asr_cfg,
+                            openai_asr_cfg=openai_asr_cfg,
+                            ollama_cfg=ollama_cfg,
+                            openai_llm_cfg=openai_llm_cfg,
+                            audio_out_cfg=audio_out_cfg,
+                            wyoming_tts_cfg=wyoming_tts_cfg,
+                            openai_tts_cfg=openai_tts_cfg,
+                            kokoro_tts_config=kokoro_tts_config,
+                            live=live,
+                        )
+                    except ConnectionRefusedError:
+                        # The ASR/TTS service is not available.
+                        # We'll wait a bit before retrying.
+                        LOGGER.warning("Connection refused, retrying in 5 seconds...")
+                        with suppress(asyncio.CancelledError):
+                            await asyncio.sleep(5)
+                    except Exception:
+                        if not general_cfg.quiet:
+                            console.print_exception()
+                        raise
     except Exception:
         if not general_cfg.quiet:
             console.print_exception()

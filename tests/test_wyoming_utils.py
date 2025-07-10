@@ -41,7 +41,7 @@ async def test_wyoming_client_context_connection_refused(
         async with wyoming_client_context("localhost", 1234, "Test", logging.getLogger()):
             pass  # This part should not be reached
 
-    assert "Test connection refused" in caplog.text
+    assert "Test connection failed" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -59,4 +59,4 @@ async def test_wyoming_client_context_generic_exception(
         async with wyoming_client_context("localhost", 1234, "Test", logging.getLogger()):
             pass  # This part should not be reached
 
-    assert "An error occurred during test connection" in caplog.text
+    assert "An unexpected error occurred during test connection" in caplog.text
