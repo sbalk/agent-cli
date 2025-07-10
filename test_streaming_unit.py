@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.asyncio
 async def test_get_synthesizer_streaming():
-    """Test that get_synthesizer returns streaming synthesizer for Kokoro when requested."""
+    """Test that get_synthesizer returns streaming synthesizer for Kokoro and OpenAI."""
     
     # Create test configuration
     provider_config = config.ProviderSelection(
@@ -58,7 +58,7 @@ async def test_get_synthesizer_streaming():
         openai_api_key=None
     )
     
-    # Test with streaming enabled
+    # Test Kokoro TTS (should always use streaming)
     synthesizer = get_synthesizer(
         provider_config=provider_config,
         audio_output_config=audio_output_config,
@@ -72,7 +72,8 @@ async def test_get_synthesizer_streaming():
     # Verify that the synthesizer function name contains "streaming"
     assert "streaming" in synthesizer.func.__name__
     
-    # Test without streaming (should return non-streaming synthesizer)
+    # Test OpenAI TTS (should always use streaming)
+    provider_config.tts_provider = "openai"
     synthesizer = get_synthesizer(
         provider_config=provider_config,
         audio_output_config=audio_output_config,
@@ -80,11 +81,11 @@ async def test_get_synthesizer_streaming():
         openai_tts_config=openai_tts_config,
         openai_llm_config=openai_llm_config,
         kokoro_tts_config=kokoro_tts_config,
-        use_streaming=False
+        use_streaming=True
     )
     
-    # Verify that the synthesizer function name does not contain "streaming"
-    assert "streaming" not in synthesizer.func.__name__
+    # Verify that the synthesizer function name contains "streaming"
+    assert "streaming" in synthesizer.func.__name__
 
 @pytest.mark.asyncio
 async def test_streaming_synthesizer_mock():
