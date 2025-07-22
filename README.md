@@ -23,7 +23,7 @@ It provides a suite of powerful tools for voice and text interaction, designed f
   - [🎤 ASR (Automatic Speech Recognition)](#-asr-automatic-speech-recognition)
   - [🗣️ TTS (Text-to-Speech)](#-tts-text-to-speech)
   - [👂 Wake Word](#-wake-word)
-- [Installation](#installation)
+- [Services Installation](#services-installation)
 - [Agent CLI Package Installation](#agent-cli-package-installation)
 - [System Integration](#system-integration)
   - [macOS Hotkeys](#macos-hotkeys)
@@ -102,7 +102,7 @@ For specific functionalities, you can set up the following optional services:
 | --------------------------------------------------------------------------- | -------------------------- |
 | [**Wyoming openWakeWord**](https://github.com/rhasspy/wyoming-openwakeword) | For the `assistant` agent. |
 
-## Installation
+## Services Installation
 
 Choose the best setup method for your platform:
 
